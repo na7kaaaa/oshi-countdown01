@@ -1,221 +1,345 @@
-<script>
-  // =========================
-  //  推し活ウィジェット（index完結版）
-  //  - 次の試合 → 次のイベント
-  //  - 日付は localStorage に保存（ボタンで随時更新）
-  // =========================
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>推し活ウィジェット</title>
+  <style>
+    :root{
+      --bg:#0b0f14;
+      --card:#111827;
+      --text:#e5e7eb;
+      --muted:#9ca3af;
+      --accent:#f472b6;
+      --pill:#2a1d2d;
+      --shadow:0 10px 30px rgba(0,0,0,.25);
+      --radius:22px;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      padding:24px;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+      color:var(--text);
+      background:transparent;
+    }
+    .wrap{ max-width:520px; margin:0 auto; }
+    .card{
+      background:
+        radial-gradient(1200px 500px at 20% -30%, rgba(244,114,182,.25), transparent 60%),
+        radial-gradient(900px 500px at 120% 0%, rgba(244,114,182,.18), transparent 55%),
+        linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01)),
+        var(--card);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:18px;
+    }
+    .title{
+      font-size:13px;
+      letter-spacing:.08em;
+      color:var(--muted);
+      margin:2px 0 12px;
+      font-weight:700;
+    }
+    .row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:14px 14px;
+      border-radius:18px;
+      background:rgba(0,0,0,.18);
+      border:1px solid rgba(255,255,255,.06);
+      margin-bottom:12px;
+      min-height:74px;
+    }
+    .left{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      min-width:0;
+    }
+    .icon{
+      width:36px; height:36px;
+      border-radius:12px;
+      display:grid; place-items:center;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.08);
+      flex:0 0 auto;
+      font-size:18px;
+    }
+    .meta{ min-width:0; }
+    .label{
+      font-size:18px;
+      font-weight:800;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .date{
+      margin-top:4px;
+      font-size:14px;
+      color:var(--muted);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .pill{
+      flex:0 0 auto;
+      padding:10px 14px;
+      border-radius:999px;
+      font-weight:800;
+      background:rgba(244,114,182,.12);
+      border:1px solid rgba(244,114,182,.35);
+      color:var(--text);
+      min-width:92px;
+      text-align:center;
+    }
+    .pill.today{
+      background:rgba(34,197,94,.14);
+      border-color:rgba(34,197,94,.45);
+    }
+    .pill.past{
+      background:rgba(148,163,184,.10);
+      border-color:rgba(148,163,184,.25);
+      color:var(--muted);
+    }
+    .footer{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-top:6px;
+      color:var(--muted);
+      font-size:13px;
+    }
+    button{
+      appearance:none;
+      border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.06);
+      color:var(--text);
+      padding:10px 14px;
+      border-radius:14px;
+      font-weight:800;
+      cursor:pointer;
+    }
+    button:hover{ background:rgba(255,255,255,.09); }
+    .hint{
+      margin-top:10px;
+      font-size:12px;
+      color:var(--muted);
+      line-height:1.5;
+    }
+    code{
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.08);
+      padding:2px 6px;
+      border-radius:8px;
+    }
+  </style>
+</head>
 
-  // 表示・計算設定（必要ならここだけ）
-  const LOCALE = "ja-JP";
-  const TIMEZONE = "Asia/Tokyo";
-  const STORAGE_KEY = "oshi_widget_data_v1";
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="title">推し活ウィジェット</div>
 
-  // 初期データ（最初だけ使われる。以後はボタンで更新した内容が優先）
-  const DEFAULT_DATA = {
-    oshiName: "推し",
-    birthday: "2000-08-06", // 年は仮でOK（毎年の次の誕生日を計算）
-    events: [
-      { name: "次のイベント", date: "2026-01-05" }
-    ]
-  };
+      <!-- 推し誕生日 -->
+      <div class="row">
+        <div class="left">
+          <div class="icon">🎂</div>
+          <div class="meta">
+            <div class="label" id="bLabel">推し誕生日（推し）</div>
+            <div class="date" id="bDateText">—</div>
+          </div>
+        </div>
+        <div class="pill" id="bCountdown">—</div>
+      </div>
 
-  const $ = (id) => document.getElementById(id);
+      <!-- 次のイベント -->
+      <div class="row">
+        <div class="left">
+          <div class="icon">⏳</div>
+          <div class="meta">
+            <div class="label" id="eLabel">次のイベント</div>
+            <div class="date" id="eDateText">—</div>
+          </div>
+        </div>
+        <div class="pill" id="eCountdown">—</div>
+      </div>
 
-  function parseYMD(ymd) {
+      <div class="footer">
+        <span id="nowText">更新: —</span>
+        <button id="editBtn" type="button">日付を変更</button>
+      </div>
+
+      <div class="hint">
+        例）イベント入力は <code>イベント名@YYYY-MM-DD</code> を改行で複数OK🧡
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================
+    // 推し活ウィジェット（index完結・確実に動く版）
+    // - 次の試合 → 次のイベント
+    // - 日付は localStorage に保存（ボタンで随時更新）
+    // - 複数イベントから「未来で最も近いもの」を自動表示
+    // =========================
+
+    const LOCALE = "ja-JP";
+    const TIMEZONE = "Asia/Tokyo";
+    const STORAGE_KEY = "oshi_widget_data_v1";
+
+    // 初期データ（初回だけ使われる。以後はボタン更新内容が優先）
+    const DEFAULT_DATA = {
+      oshiName: "推し",
+      birthday: "2000-08-06", // 年は仮でOK（毎年の次の誕生日を計算）
+      events: [
+        { name: "次のイベント", date: "2026-01-05" }
+      ]
+    };
+
+    const $ = (id) => document.getElementById(id);
+
     // timezoneズレを避けるため「UTC正午」で扱う
-    const [y, m, d] = ymd.split("-").map(Number);
-    return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
-  }
-
-  function tokyoTodayUTCNoon() {
-    const now = new Date();
-    const parts = new Intl.DateTimeFormat(LOCALE, {
-      timeZone: TIMEZONE,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit"
-    }).formatToParts(now);
-
-    const y = parts.find(p => p.type === "year").value;
-    const m = parts.find(p => p.type === "month").value;
-    const d = parts.find(p => p.type === "day").value;
-    return parseYMD(`${y}-${m}-${d}`);
-  }
-
-  function daysDiff(fromUTCNoon, toUTCNoon) {
-    const ms = toUTCNoon - fromUTCNoon;
-    return Math.round(ms / (1000 * 60 * 60 * 24));
-  }
-
-  function formatDate(ymd) {
-    const dt = parseYMD(ymd);
-    return new Intl.DateTimeFormat(LOCALE, {
-      timeZone: TIMEZONE,
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      weekday: "short"
-    }).format(dt);
-  }
-
-  function nextBirthday(birthdayYMD, baseDateUTCNoon) {
-    const [, mm, dd] = birthdayYMD.split("-").map(Number);
-
-    const yearNow = Number(new Intl.DateTimeFormat(LOCALE, {
-      timeZone: TIMEZONE,
-      year: "numeric"
-    }).format(new Date()));
-
-    let target = new Date(Date.UTC(yearNow, mm - 1, dd, 12, 0, 0));
-    if (daysDiff(baseDateUTCNoon, target) < 0) {
-      target = new Date(Date.UTC(yearNow + 1, mm - 1, dd, 12, 0, 0));
+    function parseYMD(ymd) {
+      const [y, m, d] = String(ymd).split("-").map(Number);
+      return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
     }
 
-    const y = target.getUTCFullYear();
-    const m = String(target.getUTCMonth() + 1).padStart(2, "0");
-    const d = String(target.getUTCDate()).padStart(2, "0");
-    return { ymd: `${y}-${m}-${d}`, dt: target };
-  }
-
-  function setPill(el, diff) {
-    el.classList.remove("today", "past");
-    if (diff === 0) {
-      el.textContent = "🎉 今日！";
-      el.classList.add("today");
-    } else if (diff > 0) {
-      el.textContent = `あと ${diff}日`;
-    } else {
-      el.textContent = `${Math.abs(diff)}日 経過`;
-      el.classList.add("past");
-    }
-  }
-
-  function loadData() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return structuredClone(DEFAULT_DATA);
-      const parsed = JSON.parse(raw);
-
-      // 最低限の整形
-      if (!parsed.oshiName) parsed.oshiName = DEFAULT_DATA.oshiName;
-      if (!parsed.birthday) parsed.birthday = DEFAULT_DATA.birthday;
-      if (!Array.isArray(parsed.events)) parsed.events = structuredClone(DEFAULT_DATA.events);
-      return parsed;
-    } catch {
-      return structuredClone(DEFAULT_DATA);
-    }
-  }
-
-  function saveData(data) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }
-
-  function pickNearestUpcomingEvent(events, baseDateUTCNoon) {
-    // 未来の最短を優先、なければ一番近い過去
-    let bestFuture = null;
-    let bestPast = null;
-
-    for (const ev of events) {
-      if (!ev?.date) continue;
-      const dt = parseYMD(ev.date);
-      const diff = daysDiff(baseDateUTCNoon, dt);
-
-      if (diff >= 0) {
-        if (!bestFuture || diff < bestFuture.diff) bestFuture = { ...ev, dt, diff };
-      } else {
-        if (!bestPast || diff > bestPast.diff) bestPast = { ...ev, dt, diff };
-      }
-    }
-    return bestFuture || bestPast || null;
-  }
-
-  function render() {
-    const base = tokyoTodayUTCNoon();
-    const data = loadData();
-
-    // 誕生日
-    $("bLabel").textContent = `推し誕生日（${data.oshiName || "推し"}）`;
-    const bTarget = nextBirthday(data.birthday, base);
-    $("bDateText").textContent = formatDate(bTarget.ymd);
-    setPill($("bCountdown"), daysDiff(base, bTarget.dt));
-
-    // 次のイベント（最短を自動表示）
-    const ev = pickNearestUpcomingEvent(data.events || [], base);
-    $("eLabel").textContent = ev?.name || "次のイベント";
-    $("eDateText").textContent = ev?.date ? formatDate(ev.date) : "—";
-    setPill($("eCountdown"), ev ? ev.diff : 0);
-
-    // 更新時刻
-    const now = new Date();
-    $("nowText").textContent =
-      "更新: " +
-      new Intl.DateTimeFormat(LOCALE, {
+    function tokyoTodayUTCNoon() {
+      const now = new Date();
+      const parts = new Intl.DateTimeFormat(LOCALE, {
         timeZone: TIMEZONE,
         year: "numeric",
         month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit"
-      }).format(now);
-  }
+        day: "2-digit"
+      }).formatToParts(now);
 
-  function quickEdit() {
-    const data = loadData();
-
-    const name = prompt("推しの呼び名（表示用）", data.oshiName);
-    if (name !== null && name.trim() !== "") data.oshiName = name.trim();
-
-    const b = prompt("推しの誕生日（YYYY-MM-DD / 年は仮でOK）", data.birthday);
-    if (b !== null && /^\d{4}-\d{2}-\d{2}$/.test(b.trim())) data.birthday = b.trim();
-
-    // 複数イベントを「名前@日付」で改行入力（簡単で強い）
-    // 例：
-    // 次のイベント@2026-01-05
-    // 現地予定@2026-01-18
-    const currentLines = (data.events || [])
-      .map(ev => `${ev.name || "次のイベント"}@${ev.date}`)
-      .join("\n");
-
-    const lines = prompt(
-      "イベント一覧（1行= 名前@YYYY-MM-DD ）\n例）次のイベント@2026-01-05",
-      currentLines || "次のイベント@2026-01-05"
-    );
-
-    if (lines !== null) {
-      const events = lines
-        .split("\n")
-        .map(s => s.trim())
-        .filter(Boolean)
-        .map(row => {
-          const [n, d] = row.split("@").map(x => (x || "").trim());
-          return { name: n || "次のイベント", date: d };
-        })
-        .filter(ev => /^\d{4}-\d{2}-\d{2}$/.test(ev.date));
-
-      // 1個も正しい日付がなければ既存を保持
-      if (events.length > 0) data.events = events;
+      const y = parts.find(p => p.type === "year")?.value;
+      const m = parts.find(p => p.type === "month")?.value;
+      const d = parts.find(p => p.type === "day")?.value;
+      return parseYMD(`${y}-${m}-${d}`);
     }
 
-    // 表示名は「次の試合」ではなく「次のイベント」へ寄せる
-    // （ユーザー入力で自由にできるけど、空の時はこれ）
-    data.events = (data.events || []).map(ev => ({
-      name: ev.name || "次のイベント",
-      date: ev.date
-    }));
+    function daysDiff(fromUTCNoon, toUTCNoon) {
+      return Math.round((toUTCNoon - fromUTCNoon) / (1000 * 60 * 60 * 24));
+    }
 
-    saveData(data);
-    render();
-  }
+    function formatDate(ymd) {
+      const dt = parseYMD(ymd);
+      return new Intl.DateTimeFormat(LOCALE, {
+        timeZone: TIMEZONE,
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        weekday: "short"
+      }).format(dt);
+    }
 
-  // ===== 初期化 =====
-  // 既存データがなければ保存しておく（初回でも動く）
-  if (!localStorage.getItem(STORAGE_KEY)) saveData(structuredClone(DEFAULT_DATA));
+    function setPill(el, diff) {
+      el.classList.remove("today", "past");
+      if (diff === 0) {
+        el.textContent = "🎉 今日！";
+        el.classList.add("today");
+      } else if (diff > 0) {
+        el.textContent = `あと ${diff}日`;
+      } else {
+        el.textContent = `${Math.abs(diff)}日 経過`;
+        el.classList.add("past");
+      }
+    }
 
-  // ボタンのidは、あなたのHTMLに合わせてね
-  // 例：<button id="editBtn">日付を変更</button>
-  const editBtn = document.getElementById("editBtn");
-  if (editBtn) editBtn.addEventListener("click", quickEdit);
+    function safeClone(obj) {
+      // structuredClone 非対応ブラウザ用の保険
+      try { return structuredClone(obj); } catch { return JSON.parse(JSON.stringify(obj)); }
+    }
 
-  render();
-  setInterval(render, 60 * 60 * 1000); // 1時間ごと更新
-</script>
+    function loadData() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return safeClone(DEFAULT_DATA);
+        const parsed = JSON.parse(raw);
+
+        if (!parsed.oshiName) parsed.oshiName = DEFAULT_DATA.oshiName;
+        if (!parsed.birthday) parsed.birthday = DEFAULT_DATA.birthday;
+        if (!Array.isArray(parsed.events)) parsed.events = safeClone(DEFAULT_DATA.events);
+
+        // eventsの整形
+        parsed.events = parsed.events
+          .filter(ev => ev && typeof ev === "object")
+          .map(ev => ({
+            name: (ev.name || "次のイベント").trim(),
+            date: (ev.date || "").trim()
+          }));
+
+        return parsed;
+      } catch {
+        return safeClone(DEFAULT_DATA);
+      }
+    }
+
+    function saveData(data) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+
+    function nextBirthday(birthdayYMD, baseDateUTCNoon) {
+      const parts = String(birthdayYMD).split("-").map(Number);
+      const mm = parts[1];
+      const dd = parts[2];
+
+      const yearNow = Number(new Intl.DateTimeFormat(LOCALE, {
+        timeZone: TIMEZONE,
+        year: "numeric"
+      }).format(new Date()));
+
+      let target = new Date(Date.UTC(yearNow, mm - 1, dd, 12, 0, 0));
+      if (daysDiff(baseDateUTCNoon, target) < 0) {
+        target = new Date(Date.UTC(yearNow + 1, mm - 1, dd, 12, 0, 0));
+      }
+
+      const y = target.getUTCFullYear();
+      const m = String(target.getUTCMonth() + 1).padStart(2, "0");
+      const d = String(target.getUTCDate()).padStart(2, "0");
+      return { ymd: `${y}-${m}-${d}`, dt: target };
+    }
+
+    function pickNearestUpcomingEvent(events, baseDateUTCNoon) {
+      let bestFuture = null;
+      let bestPast = null;
+
+      for (const ev of events) {
+        if (!ev?.date || !/^\d{4}-\d{2}-\d{2}$/.test(ev.date)) continue;
+
+        const dt = parseYMD(ev.date);
+        const diff = daysDiff(baseDateUTCNoon, dt);
+
+        if (diff >= 0) {
+          if (!bestFuture || diff < bestFuture.diff) bestFuture = { ...ev, dt, diff };
+        } else {          
+          if (!bestPast || diff > bestPast.diff) bestPast = { ...ev, dt, diff };
+        }
+      }
+      return bestFuture || bestPast || null;
+    }
+
+    function render() {
+      const base = tokyoTodayUTCNoon();
+      const data = loadData();
+
+      // 誕生日
+      $("bLabel").textContent = `推し誕生日（${data.oshiName || "推し"}）`;
+      const bTarget = nextBirthday(data.birthday, base);
+      $("bDateText").textContent = formatDate(bTarget.ymd);
+      setPill($("bCountdown"), daysDiff(base, bTarget.dt));
+
+      // 次のイベント
+      const ev = pickNearestUpcomingEvent(data.events || [], base);
+      $("eLabel").textContent = ev?.name || "次のイベント";
+      $("eDateText").textContent = ev?.date ? formatDate(ev.date) : "—";
+      setPill($("eCountdown"), ev ? ev.diff : 0);
+
+      // 更新時刻
+      cons
