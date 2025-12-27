@@ -1,0 +1,221 @@
+<script>
+  // =========================
+  //  推し活ウィジェット（index完結版）
+  //  - 次の試合 → 次のイベント
+  //  - 日付は localStorage に保存（ボタンで随時更新）
+  // =========================
+
+  // 表示・計算設定（必要ならここだけ）
+  const LOCALE = "ja-JP";
+  const TIMEZONE = "Asia/Tokyo";
+  const STORAGE_KEY = "oshi_widget_data_v1";
+
+  // 初期データ（最初だけ使われる。以後はボタンで更新した内容が優先）
+  const DEFAULT_DATA = {
+    oshiName: "推し",
+    birthday: "2000-08-06", // 年は仮でOK（毎年の次の誕生日を計算）
+    events: [
+      { name: "次のイベント", date: "2026-01-05" }
+    ]
+  };
+
+  const $ = (id) => document.getElementById(id);
+
+  function parseYMD(ymd) {
+    // timezoneズレを避けるため「UTC正午」で扱う
+    const [y, m, d] = ymd.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  }
+
+  function tokyoTodayUTCNoon() {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat(LOCALE, {
+      timeZone: TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(now);
+
+    const y = parts.find(p => p.type === "year").value;
+    const m = parts.find(p => p.type === "month").value;
+    const d = parts.find(p => p.type === "day").value;
+    return parseYMD(`${y}-${m}-${d}`);
+  }
+
+  function daysDiff(fromUTCNoon, toUTCNoon) {
+    const ms = toUTCNoon - fromUTCNoon;
+    return Math.round(ms / (1000 * 60 * 60 * 24));
+  }
+
+  function formatDate(ymd) {
+    const dt = parseYMD(ymd);
+    return new Intl.DateTimeFormat(LOCALE, {
+      timeZone: TIMEZONE,
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      weekday: "short"
+    }).format(dt);
+  }
+
+  function nextBirthday(birthdayYMD, baseDateUTCNoon) {
+    const [, mm, dd] = birthdayYMD.split("-").map(Number);
+
+    const yearNow = Number(new Intl.DateTimeFormat(LOCALE, {
+      timeZone: TIMEZONE,
+      year: "numeric"
+    }).format(new Date()));
+
+    let target = new Date(Date.UTC(yearNow, mm - 1, dd, 12, 0, 0));
+    if (daysDiff(baseDateUTCNoon, target) < 0) {
+      target = new Date(Date.UTC(yearNow + 1, mm - 1, dd, 12, 0, 0));
+    }
+
+    const y = target.getUTCFullYear();
+    const m = String(target.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(target.getUTCDate()).padStart(2, "0");
+    return { ymd: `${y}-${m}-${d}`, dt: target };
+  }
+
+  function setPill(el, diff) {
+    el.classList.remove("today", "past");
+    if (diff === 0) {
+      el.textContent = "🎉 今日！";
+      el.classList.add("today");
+    } else if (diff > 0) {
+      el.textContent = `あと ${diff}日`;
+    } else {
+      el.textContent = `${Math.abs(diff)}日 経過`;
+      el.classList.add("past");
+    }
+  }
+
+  function loadData() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return structuredClone(DEFAULT_DATA);
+      const parsed = JSON.parse(raw);
+
+      // 最低限の整形
+      if (!parsed.oshiName) parsed.oshiName = DEFAULT_DATA.oshiName;
+      if (!parsed.birthday) parsed.birthday = DEFAULT_DATA.birthday;
+      if (!Array.isArray(parsed.events)) parsed.events = structuredClone(DEFAULT_DATA.events);
+      return parsed;
+    } catch {
+      return structuredClone(DEFAULT_DATA);
+    }
+  }
+
+  function saveData(data) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  function pickNearestUpcomingEvent(events, baseDateUTCNoon) {
+    // 未来の最短を優先、なければ一番近い過去
+    let bestFuture = null;
+    let bestPast = null;
+
+    for (const ev of events) {
+      if (!ev?.date) continue;
+      const dt = parseYMD(ev.date);
+      const diff = daysDiff(baseDateUTCNoon, dt);
+
+      if (diff >= 0) {
+        if (!bestFuture || diff < bestFuture.diff) bestFuture = { ...ev, dt, diff };
+      } else {
+        if (!bestPast || diff > bestPast.diff) bestPast = { ...ev, dt, diff };
+      }
+    }
+    return bestFuture || bestPast || null;
+  }
+
+  function render() {
+    const base = tokyoTodayUTCNoon();
+    const data = loadData();
+
+    // 誕生日
+    $("bLabel").textContent = `推し誕生日（${data.oshiName || "推し"}）`;
+    const bTarget = nextBirthday(data.birthday, base);
+    $("bDateText").textContent = formatDate(bTarget.ymd);
+    setPill($("bCountdown"), daysDiff(base, bTarget.dt));
+
+    // 次のイベント（最短を自動表示）
+    const ev = pickNearestUpcomingEvent(data.events || [], base);
+    $("eLabel").textContent = ev?.name || "次のイベント";
+    $("eDateText").textContent = ev?.date ? formatDate(ev.date) : "—";
+    setPill($("eCountdown"), ev ? ev.diff : 0);
+
+    // 更新時刻
+    const now = new Date();
+    $("nowText").textContent =
+      "更新: " +
+      new Intl.DateTimeFormat(LOCALE, {
+        timeZone: TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(now);
+  }
+
+  function quickEdit() {
+    const data = loadData();
+
+    const name = prompt("推しの呼び名（表示用）", data.oshiName);
+    if (name !== null && name.trim() !== "") data.oshiName = name.trim();
+
+    const b = prompt("推しの誕生日（YYYY-MM-DD / 年は仮でOK）", data.birthday);
+    if (b !== null && /^\d{4}-\d{2}-\d{2}$/.test(b.trim())) data.birthday = b.trim();
+
+    // 複数イベントを「名前@日付」で改行入力（簡単で強い）
+    // 例：
+    // 次のイベント@2026-01-05
+    // 現地予定@2026-01-18
+    const currentLines = (data.events || [])
+      .map(ev => `${ev.name || "次のイベント"}@${ev.date}`)
+      .join("\n");
+
+    const lines = prompt(
+      "イベント一覧（1行= 名前@YYYY-MM-DD ）\n例）次のイベント@2026-01-05",
+      currentLines || "次のイベント@2026-01-05"
+    );
+
+    if (lines !== null) {
+      const events = lines
+        .split("\n")
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(row => {
+          const [n, d] = row.split("@").map(x => (x || "").trim());
+          return { name: n || "次のイベント", date: d };
+        })
+        .filter(ev => /^\d{4}-\d{2}-\d{2}$/.test(ev.date));
+
+      // 1個も正しい日付がなければ既存を保持
+      if (events.length > 0) data.events = events;
+    }
+
+    // 表示名は「次の試合」ではなく「次のイベント」へ寄せる
+    // （ユーザー入力で自由にできるけど、空の時はこれ）
+    data.events = (data.events || []).map(ev => ({
+      name: ev.name || "次のイベント",
+      date: ev.date
+    }));
+
+    saveData(data);
+    render();
+  }
+
+  // ===== 初期化 =====
+  // 既存データがなければ保存しておく（初回でも動く）
+  if (!localStorage.getItem(STORAGE_KEY)) saveData(structuredClone(DEFAULT_DATA));
+
+  // ボタンのidは、あなたのHTMLに合わせてね
+  // 例：<button id="editBtn">日付を変更</button>
+  const editBtn = document.getElementById("editBtn");
+  if (editBtn) editBtn.addEventListener("click", quickEdit);
+
+  render();
+  setInterval(render, 60 * 60 * 1000); // 1時間ごと更新
+</script>
